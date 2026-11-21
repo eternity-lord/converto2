@@ -5,12 +5,13 @@ from pathlib import Path
 from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QImage, QPixmap, QColor
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QGridLayout, QTableWidget, QTableWidgetItem,
-                              QHeaderView, QProgressBar, QMenu, QApplication)
+                              QHeaderView, QMenu, QApplication)
 from app.core.queue import ACTIVE, TERMINAL
 from app.core.process import capture, tool
 from app.core.settings import data_dir
 from app.core.qsv import preview_command
-from app.ui.widgets.common import GlassWindow, Card, Chart, Toggle, label, button, row
+from app.ui.design_tokens import token
+from app.ui.widgets.common import GlassWindow, Card, Chart, Toggle, ProgressBar, EmptyTable, label, button, row
 from app.ui.pages.fixer import combo, selected
 from app.ui import dialogs
 from app.i18n import tr
@@ -23,21 +24,24 @@ def clock(seconds):
     return f'{seconds//3600:02}:{seconds//60%60:02}:{seconds%60:02}'
 
 
-class QueueTable(QTableWidget):
+class QueueTable(EmptyTable):
     reordered = Signal(str, str)
 
     HEADERS = ['Source / file', 'Source info', 'Preset / output', 'Status', 'Progress']
 
     def __init__(self):
-        super().__init__(0, 5)
+        super().__init__(0, 5, empty_title='Queue empty',
+                         empty_body='Add a folder to get started')
+        self.setEmptyState('Queue empty', 'Add a folder to get started')
         self.retranslate()
         self.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         self.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
         self.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
         self.horizontalHeader().setSectionResizeMode(3, QHeaderView.Interactive)
-        self.setColumnWidth(3,300)
+        self.setColumnWidth(3, int(token('table_status_width')))
         self.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
         self.verticalHeader().hide()
+        self.verticalHeader().setDefaultSectionSize(int(token('table_row_height')))
         self.setSelectionBehavior(QTableWidget.SelectRows)
         self.setSelectionMode(QTableWidget.SingleSelection)
         self.setEditTriggers(QTableWidget.NoEditTriggers)
@@ -45,10 +49,11 @@ class QueueTable(QTableWidget):
         self.setAcceptDrops(True)
         self.setDragDropMode(QTableWidget.InternalMove)
         self.setDefaultDropAction(Qt.MoveAction)
-        self.setMinimumHeight(150)
+        self.setMinimumHeight(int(token('queue_table_min_height')))
 
     def retranslate(self):
         self.setHorizontalHeaderLabels([tr(text) for text in self.HEADERS])
+        self.setEmptyState('Queue empty', 'Add a folder to get started')
 
     def dropEvent(self, event):
         source = self.currentRow()
@@ -64,8 +69,9 @@ class EncodingWindow(GlassWindow):
     completion_action = Signal(str)
 
     def __init__(self, manager):
-        super().__init__('EDIUS Booster · Encoding queue', (1000, 710))
-        self.resize(1240, 840)
+        super().__init__('EDIUS Booster · Encoding queue',
+                         (int(token('window_min_width')), int(token('window_min_height'))))
+        self.resize(int(token('encoding_default_width')), int(token('encoding_default_height')))
         self.manager = manager
         self.preview_busy = False
         self.last_preview = 0
@@ -80,10 +86,11 @@ class EncodingWindow(GlassWindow):
         self.preview_messages = {}
         self.content = QWidget()
         layout = QVBoxLayout(self.content)
-        layout.setContentsMargins(10, 3, 10, 10)
+        layout.setContentsMargins(token('space_3'), token('space_1'), token('space_3'), token('space_3'))
+        layout.setSpacing(token('space_3'))
         self.summary_card = Card()
-        self.summary = label('', 'muted')
-        self.overall = QProgressBar()
+        self.summary = label('', 'mono')
+        self.overall = ProgressBar()
         self.summary_card.box.addWidget(self.summary)
         self.summary_card.box.addWidget(self.overall)
         layout.addWidget(self.summary_card)
@@ -97,16 +104,16 @@ class EncodingWindow(GlassWindow):
         grid = QGridLayout()
         self.preview = label('Preview · waiting', 'muted')
         self.preview.setAlignment(Qt.AlignCenter)
-        self.preview.setFixedSize(285, 160)
-        self.preview.setStyleSheet('background:#09080b;border-radius:14px;')
+        self.preview.setFixedSize(int(token('preview_width')), int(token('preview_height')))
+        self.preview.setProperty('role', 'preview')
         grid.addWidget(self.preview, 0, 0, 3, 1)
         self.current_title = label('No files yet', 'title')
-        self.metrics = label('Waiting', 'muted')
-        self.current_progress = QProgressBar()
+        self.metrics = label('Waiting', 'mono')
+        self.current_progress = ProgressBar()
         self.pipeline = label('CPU / QSV', 'badge')
         self.chart = Chart(120)
-        self.chart.setMinimumHeight(65)
-        self.chart.setMaximumHeight(90)
+        self.chart.setMinimumHeight(int(token('encoding_chart_min_height')))
+        self.chart.setMaximumHeight(int(token('encoding_chart_max_height')))
         grid.addWidget(self.current_title, 0, 1)
         grid.addWidget(self.pipeline, 0, 2)
         grid.addWidget(self.current_progress, 1, 1, 1, 2)
@@ -115,10 +122,10 @@ class EncodingWindow(GlassWindow):
         current.box.addLayout(grid)
         layout.addWidget(current, 2)
         self.pause_button = button('Pause', self.toggle_pause)
-        self.stop_button = button('Stop current', self.stop_current)
+        self.stop_button = button('Stop current', self.stop_current, variant='danger')
         self.skip_button = button('Skip file', self.skip_selected)
         self.skip_analysis_button = button('Skip analysis', self.skip_analysis)
-        self.stop_all_button = button('Stop all', manager.stop_all)
+        self.stop_all_button = button('Stop all', manager.stop_all, variant='danger')
         self.open_button = button('Open output folder', self.open_output)
         self.clear_button = button('Clear finished', self.clear_finished)
         layout.addLayout(row(self.pause_button, self.stop_button, self.skip_button,
@@ -132,7 +139,7 @@ class EncodingWindow(GlassWindow):
         layout.addLayout(row(self.topmost, self.autoclose, self.finished_label, self.action))
         self.root.addWidget(self.content)
         self.timer = QTimer(self)
-        self.timer.setInterval(500)
+        self.timer.setInterval(int(token('queue_refresh_interval')))
         self.timer.timeout.connect(self.refresh)
         self.timer.start()
         manager.started.connect(self.open)
@@ -250,7 +257,11 @@ class EncodingWindow(GlassWindow):
                     item.setToolTip(str(job.source) + '\n' + job.data.get('detected', ''))
                 if col == 3:
                     item.setToolTip(job.data.get('badge') or job.data.get('reason') or job.data.get('step',''))
-                    item.setForeground(QColor('#8ecba5' if job.status == 'TV-Safe ✓' else '#e8c278' if job.status == 'Warning' else '#f87171' if job.status in ('Failed','Blocked') else '#baa4ba'))
+                    status_color = (token('success') if job.status == 'TV-Safe ✓' else
+                                    token('warning') if job.status == 'Warning' else
+                                    token('danger') if job.status in ('Failed', 'Blocked') else
+                                    token('text_secondary'))
+                    item.setForeground(QColor(status_color))
         self.table.blockSignals(False)
         job = self.current()
         if not job:
@@ -261,7 +272,10 @@ class EncodingWindow(GlassWindow):
         self.pipeline.setText(d.get('encoding_status', d.get('pipeline', tr(job.status))))
         self.pipeline.setWordWrap(True)
         self.pipeline.setToolTip(d.get('encoding_status','') + '\n' + d.get('reason',''))
-        self.pipeline.setStyleSheet('color:#e8c278; background:#302715;' if job.status == 'Warning' else '')
+        tone = 'warning' if job.status == 'Warning' else 'danger' if job.status in ('Failed', 'Blocked') else ''
+        self.pipeline.setProperty('tone', tone)
+        self.pipeline.style().unpolish(self.pipeline)
+        self.pipeline.style().polish(self.pipeline)
         total_frames = round(job.media.duration * float(d['target'].fps)) if job.media and d.get('target') else '?'
         target = d.get('target')
         target_text = f'{target.width}×{target.height} · {float(target.fps):.3f} CFR · {target.profile}@{target.level} · 8-bit 4:2:0 · AAC 48k stereo' if target else ''

@@ -5,16 +5,16 @@ from collections import deque
 from dataclasses import replace
 from pathlib import Path
 from datetime import date
-from PySide6.QtCore import Qt, Signal, QTimer, QByteArray, QUrl
-from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QDesktopServices
+from PySide6.QtCore import Qt, Signal, QTimer, QByteArray, QPropertyAnimation, QEasingCurve, QPoint, QPointF, QSize
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget, QLineEdit,
-                              QSystemTrayIcon, QMenu, QApplication)
-from app.ui.theme import asset
+                              QSystemTrayIcon, QMenu, QApplication, QGraphicsOpacityEffect, QSizePolicy)
+from app.ui.theme import apply_theme
+from app.ui.design_tokens import token, duration, motion_easing, reduce_motion
 from app.core.capabilities import probe_capabilities, load_cached_capabilities
 from app.core.process import tool, capture, terminate_all
 from app.core.queue import QueueManager, FolderWatcher, TERMINAL, MAX_JOBS
 from app.core.system_tweaks import SystemTweaks, cpu_temperature
-from app.ui.widgets.common import GlassWindow, Card, Pills, label, button, row, scroll, icon
+from app.ui.widgets.common import GlassWindow, Card, Pills, Toast, label, button, row, scroll, icon, set_rtl
 from app.ui.pages.fixer import FixerPage
 from app.ui.pages.dashboard import Dashboard
 from app.ui.pages.tools import AdvancedPage, TweaksPage, SettingsPage, SupportPage
@@ -28,8 +28,9 @@ PAGES = ['Dashboard', 'MP4 Profile Fixer', 'HQX Converter', 'QSV Advanced', 'Sys
 
 class Monitor(GlassWindow):
     def __init__(self):
-        super().__init__('EDIUS Turbo Monitor · Mohammad Irani', (320, 160))
-        self.resize(350, 180)
+        super().__init__('EDIUS Turbo Monitor · Mohammad Irani',
+                         (int(token('monitor_default_width')), int(token('monitor_default_height'))))
+        self.resize(int(token('monitor_default_width')), int(token('monitor_default_height')))
         self.setWindowFlag(Qt.WindowStaysOnTopHint)
         self.reading = label('CPU · RAM · Temperature', 'title')
         self.root.addWidget(self.reading)
@@ -44,11 +45,17 @@ class MainWindow(GlassWindow):
     cleanup_done = Signal()
 
     def __init__(self, settings):
-        super().__init__('EDIUS Booster · Studio v7', (1100,720))
+        super().__init__('EDIUS Booster · Studio v7',
+                         (int(token('window_min_width')), int(token('window_min_height'))))
         self.settings = settings
+        self.sidebar_collapsed = bool(settings.get('sidebar_collapsed', False))
+        self._sidebar_animation = None
+        self._page_animation = None
+        self._theme_animation = None
+        self.toast = None
         self.closing = False
         self.cleanup_done.connect(QApplication.instance().quit)
-        self.resize(1400, 900)
+        self.resize(int(token('window_default_width')), int(token('window_default_height')))
         geometry = settings.get('geometry')
         if geometry:
             self.restoreGeometry(QByteArray.fromBase64(geometry.encode()))
@@ -85,6 +92,7 @@ class MainWindow(GlassWindow):
         self.logs = LogView()
         self.content = None
         self.build_ui()
+        self.toast = Toast(self)
         self.background_log.connect(self.logs.append)
         self.manager.log.connect(self.logs.append)
         self.manager.changed.connect(self.queue_changed)
@@ -101,7 +109,7 @@ class MainWindow(GlassWindow):
         self.create_tray()
         self.manager.safety_alert.connect(self.safety_toast)
         self.timer = QTimer(self)
-        self.timer.setInterval(1000)
+        self.timer.setInterval(int(token('metrics_refresh_interval')))
         self.timer.timeout.connect(self.poll_metrics)
         self.timer.start()
         # A valid cache is available instantly; without it a job started in the first
@@ -115,58 +123,123 @@ class MainWindow(GlassWindow):
         self.background_log.emit('INFO','Ready. Select a folder to analyze or convert.','','')
 
     def build_ui(self):
-        old = self.content        # Keep the bounded log model alive across language changes.
+        if self._sidebar_animation is not None:
+            self._sidebar_animation.stop()
+        if self._page_animation is not None:
+            self._page_animation.stop()
+        old = self.content
+        # Preserve the bounded log model across the EN/فارسی page rebuild.
         self.logs.setParent(None)
         self.content = QWidget()
+        self.content.setObjectName('studioContent')
         outer = QHBoxLayout(self.content)
-        outer.setContentsMargins(6, 4, 6, 6)
-        outer.setSpacing(15)
-        sidebar = Card()
-        sidebar.setFixedWidth(216)
-        sidebar.box.setContentsMargins(12,20,12,16)
-        sidebar.box.addWidget(label('H  EDIUS Booster', 'title'))
-        sidebar.box.addWidget(label('   CREATIVE STUDIO / 07', 'muted'))
-        sidebar.box.addSpacing(15)
+        outer.setContentsMargins(token('space_2'), token('space_2'), token('space_2'), token('space_2'))
+        outer.setSpacing(token('space_4'))
+
+        self.sidebar = Card(surface='glass')
+        sidebar_width = int(token('sidebar_collapsed_width') if self.sidebar_collapsed else token('sidebar_width'))
+        self.sidebar.setMinimumWidth(sidebar_width)
+        self.sidebar.setMaximumWidth(sidebar_width)
+        self.sidebar.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
+        self.sidebar.box.setContentsMargins(token('space_3'), token('space_4'), token('space_3'), token('space_4'))
+        self.sidebar.box.setSpacing(token('space_2'))
+
+        brand_header = QWidget()
+        brand_layout = QHBoxLayout(brand_header)
+        brand_layout.setContentsMargins(token('space_0'), token('space_0'), token('space_0'), token('space_0'))
+        brand_layout.setSpacing(token('space_2'))
+        brand_size = int(token('icon_l') + token('space_2'))
+        self.brand_mark = QLabel()
+        self.brand_mark.setPixmap(icon('brand', size=brand_size).pixmap(QSize(brand_size, brand_size)))
+        self.brand_mark.setFixedSize(brand_size, brand_size)
+        brand_layout.addWidget(self.brand_mark)
+        brand_text = QWidget()
+        brand_text_layout = QVBoxLayout(brand_text)
+        brand_text_layout.setContentsMargins(token('space_0'), token('space_0'), token('space_0'), token('space_0'))
+        brand_text_layout.setSpacing(token('space_0'))
+        self.brand_title = label('EDIUS Booster', 'subtitle')
+        self.brand_subtitle = label('CREATIVE STUDIO / 07', 'caption')
+        brand_text_layout.addWidget(self.brand_title)
+        brand_text_layout.addWidget(self.brand_subtitle)
+        brand_layout.addWidget(brand_text, 1)
+        self.sidebar_toggle = button('', self.toggle_sidebar, glyph='collapse', variant='icon')
+        self.sidebar_toggle.setAccessibleName(tr('Collapse sidebar'))
+        self.sidebar_toggle.setToolTip(tr('Collapse sidebar'))
+        brand_layout.addWidget(self.sidebar_toggle)
+        self.sidebar.box.addWidget(brand_header)
+
         self.nav = {}
-        glyphs = ['dashboard', 'fixer', 'hqx', 'qsv', 'tweaks', 'logs', 'settings', 'support']
-        for i, name in enumerate(PAGES):
-            if i == 6:
-                sidebar.box.addStretch()
-                queue_button = button('Encoding queue', self.encoding.open, glyph='queue')
-                sidebar.box.addWidget(queue_button)
-            btn = button(f'  {tr(name)}', lambda checked=False,n=name: self.navigate(n), glyph=glyphs[i])
-            btn.setProperty('nav',True)
-            btn.setCheckable(True)
-            sidebar.box.addWidget(btn)
-            self.nav[name] = btn
-        outer.addWidget(sidebar)
+        glyphs = {
+            'Dashboard': 'dashboard', 'MP4 Profile Fixer': 'fixer', 'HQX Converter': 'hqx',
+            'QSV Advanced': 'qsv', 'System Tweaks': 'tweaks', 'Logs': 'logs',
+            'Settings': 'settings', 'Support': 'support',
+        }
+
+        def add_nav(name):
+            nav_button = button(tr(name), lambda checked=False, page=name: self.navigate(page),
+                                glyph=glyphs[name])
+            nav_button.setProperty('nav', True)
+            nav_button.setCheckable(True)
+            nav_button.setIconSize(QSize(int(token('navigation_icon')), int(token('navigation_icon'))))
+            nav_button.setMinimumHeight(int(token('navigation_height')))
+            nav_button.setToolTip(tr(name))
+            self.sidebar.box.addWidget(nav_button)
+            self.nav[name] = nav_button
+
+        for heading, names in (
+            ('WORKSPACE', ['Dashboard', 'MP4 Profile Fixer', 'HQX Converter', 'QSV Advanced']),
+            ('SYSTEM', ['System Tweaks']),
+            ('ACTIVITY', ['Logs']),
+        ):
+            group = label(heading, 'caption')
+            group.setProperty('role', 'caption')
+            group.setProperty('navGroup', True)
+            self.sidebar.box.addWidget(group)
+            for name in names:
+                add_nav(name)
+            if heading != 'ACTIVITY':
+                self.sidebar.box.addSpacing(int(token('space_2')))
+
+        self.sidebar.box.addStretch(1)
+        self.queue_button = button('Encoding queue', self.encoding.open, glyph='queue')
+        self.queue_button.setToolTip(tr('Encoding queue'))
+        self.sidebar.box.addWidget(self.queue_button)
+        add_nav('Settings')
+        add_nav('Support')
+        self.nav_indicator = QWidget(self.sidebar)
+        self.nav_indicator.setObjectName('navIndicator')
+        self.nav_indicator.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.nav_indicator.setFixedSize(int(token('indicator_width')), int(token('nav_indicator_height')))
+        self.nav_indicator.hide()
+        outer.addWidget(self.sidebar)
+
         right = QVBoxLayout()
-        right.setSpacing(14)
+        right.setContentsMargins(token('space_0'), token('space_0'), token('space_0'), token('space_0'))
+        right.setSpacing(token('space_4'))
         welcome = QWidget()
         welcome_box = QVBoxLayout(welcome)
-        welcome_box.setContentsMargins(0,0,0,0)
+        welcome_box.setContentsMargins(token('space_0'), token('space_0'), token('space_0'), token('space_0'))
+        welcome_box.setSpacing(token('space_1'))
         welcome_box.addWidget(label(f'{tr("Welcome,")} Mamad', 'title'))
         welcome_box.addWidget(label('Your studio. Faster, safer, beautifully in sync.', 'muted'))
         self.cap_badge = label('QSV · probing…', 'badge')
-        queue_round = button('', self.encoding.open, glyph='queue')
-        queue_round.setFixedSize(36, 36)
-        queue_round.setStyleSheet('padding:0;border-radius:18px;')
+        queue_round = button('', self.encoding.open, glyph='queue', variant='icon')
         queue_round.setToolTip(tr('Encoding queue'))
-        settings_round = button('', lambda: self.navigate('Settings'), glyph='settings')
-        settings_round.setFixedSize(36, 36)
-        settings_round.setStyleSheet('padding:0;border-radius:18px;')
+        settings_round = button('', lambda: self.navigate('Settings'), glyph='settings', variant='icon')
         settings_round.setToolTip(tr('Settings'))
         header = row(welcome, None, self.cap_badge, queue_round, settings_round,
                      label(f'Mamad\n{tr("Creator workspace")}', 'muted'))
         right.addLayout(header)
+
         self.search = QLineEdit()
         self.search.addAction(icon('search'), QLineEdit.LeadingPosition)
         self.search.setPlaceholderText(tr('Search files / filter logs'))
-        self.search.textChanged.connect(self.search_changed)
-        self.search.setMaximumWidth(340)
+        self.search.setMaximumWidth(int(token('search_max_width')))
         self.tabs = Pills(['Studio', 'Convert', 'Tools'], 'Studio')
-        self.tabs.selected.connect(lambda name: self.navigate({'Studio':'Dashboard','Convert':'MP4 Profile Fixer','Tools':'System Tweaks'}[name]))
+        self.tabs.selected.connect(lambda name: self.navigate(
+            {'Studio': 'Dashboard', 'Convert': 'MP4 Profile Fixer', 'Tools': 'System Tweaks'}[name]))
         right.addLayout(row(self.tabs, None, self.search))
+
         self.stack = QStackedWidget()
         self.dashboard = Dashboard(lambda: self.navigate('MP4 Profile Fixer'))
         self.fixer = FixerPage(self.settings, self.manager)
@@ -175,8 +248,9 @@ class MainWindow(GlassWindow):
         self.tweaks_page = TweaksPage()
         self.settings_page = SettingsPage(self.settings)
         self.settings_page.language_changed.connect(self.change_language)
+        self.settings_page.theme_changed.connect(self.change_theme)
         self.settings_page.reprobe.connect(lambda: self.probe_hardware(True))
-        self.settings_page.concurrency_changed.connect(lambda value: setattr(self.manager,'limit',value))
+        self.settings_page.concurrency_changed.connect(lambda value: setattr(self.manager, 'limit', value))
         self.settings_page.execution_changed.connect(self.set_execution_policy)
         self.settings_page.monitor_requested.connect(self.monitor.show)
         self.tweaks_page.apply_requested.connect(self.apply_tweaks)
@@ -188,48 +262,161 @@ class MainWindow(GlassWindow):
             if page is self.logs:
                 self.stack.addWidget(page)
             elif page in (self.fixer, self.hqx):
-                # Scrollable options plus a fixed action footer (Start / Stop visible).
+                # Keep the fixed primary action visible while options scroll.
                 container = QWidget()
                 box = QVBoxLayout(container)
-                box.setContentsMargins(0, 0, 0, 0)
-                box.setSpacing(8)
+                box.setContentsMargins(token('space_0'), token('space_0'), token('space_0'), token('space_0'))
+                box.setSpacing(token('space_2'))
                 box.addWidget(scroll(page), 1)
                 box.addWidget(page.action_bar)
                 self.stack.addWidget(container)
             else:
                 self.stack.addWidget(scroll(page))
         for page in (self.fixer, self.hqx):
-            page.add_requested.connect(lambda folder, options, start, p=page: self.scan_folder(folder, options, start, p))
+            page.add_requested.connect(lambda folder, options, start, p=page:
+                                       self.scan_folder(folder, options, start, p))
         self.hqx.watch_requested.connect(self.start_watch)
         self.hqx.stop_watch_requested.connect(self.stop_watch)
         right.addWidget(self.stack, 1)
-        outer.addLayout(right,1)
+        outer.addLayout(right, 1)
         self.root.addWidget(self.content)
         if old:
             self.root.removeWidget(old)
             old.deleteLater()
-        self.navigate('Dashboard')
-        direction = Qt.RightToLeft if self.settings.get('language') == 'fa' else Qt.LeftToRight
-        self.setLayoutDirection(direction)
+
+        rtl = self.settings.get('language') == 'fa'
+        set_rtl(self, rtl)
         # Separate top-level windows are not children, so mirror them explicitly.
         for window in (getattr(self, 'encoding', None), getattr(self, 'monitor', None)):
             if window is not None:
-                window.setLayoutDirection(direction)
+                set_rtl(window, rtl)
         if getattr(self, 'encoding', None) is not None:
             self.encoding.retranslate()
+        self._apply_sidebar_state()
         self.advanced.apply_caps(self.manager.capabilities)
         if self.manager.capabilities:
-            # Re-apply hardware state to the freshly rebuilt pages (language switch).
             self.set_capabilities(self.manager.capabilities, announce=False)
+        self.navigate('Dashboard')
         self.queue_changed()
 
+    def _apply_sidebar_state(self):
+        if not hasattr(self, 'sidebar'):
+            return
+        collapsed = self.sidebar_collapsed
+        self.brand_mark.setVisible(not collapsed)
+        self.brand_title.setVisible(not collapsed)
+        self.brand_subtitle.setVisible(not collapsed)
+        group_labels = self.sidebar.findChildren(QLabel)
+        for group in group_labels:
+            if group.property('navGroup'):
+                group.setVisible(not collapsed)
+        for name, nav_button in self.nav.items():
+            nav_button.setText('' if collapsed else tr(name))
+            nav_button.setProperty('iconOnly', collapsed)
+            nav_button.setProperty('rtl', self.layoutDirection() == Qt.LayoutDirection.RightToLeft)
+            nav_button.setToolTip(tr(name))
+            nav_button.style().unpolish(nav_button)
+            nav_button.style().polish(nav_button)
+            nav_button.refresh_icon()
+        self.queue_button.setText('' if collapsed else tr('Encoding queue'))
+        self.queue_button.setProperty('iconOnly', collapsed)
+        self.queue_button.style().unpolish(self.queue_button)
+        self.queue_button.style().polish(self.queue_button)
+        self.queue_button.refresh_icon()
+        self.sidebar_toggle._glyph = 'expand' if collapsed else 'collapse'
+        self.sidebar_toggle.setProperty('iconGlyph', self.sidebar_toggle._glyph)
+        self.sidebar_toggle.setAccessibleName(tr('Expand sidebar' if collapsed else 'Collapse sidebar'))
+        self.sidebar_toggle.setToolTip(tr('Expand sidebar' if collapsed else 'Collapse sidebar'))
+        self.sidebar_toggle.refresh_icon()
+        QTimer.singleShot(0, lambda: self._move_nav_indicator(self.stack.currentIndex(), False))
+
+    def toggle_sidebar(self):
+        self.sidebar_collapsed = not self.sidebar_collapsed
+        self.settings.set('sidebar_collapsed', self.sidebar_collapsed)
+        start = self.sidebar.width()
+        end = int(token('sidebar_collapsed_width') if self.sidebar_collapsed else token('sidebar_width'))
+        self.sidebar.setMinimumWidth(min(start, end))
+        self.sidebar.setMaximumWidth(max(start, end))
+        self._apply_sidebar_state()
+        if self._sidebar_animation is not None:
+            self._sidebar_animation.stop()
+        if reduce_motion():
+            self.sidebar.setFixedWidth(end)
+            self._move_nav_indicator(self.stack.currentIndex(), False)
+            return
+        self._sidebar_animation = QPropertyAnimation(self.sidebar, b'maximumWidth', self)
+        self._sidebar_animation.setDuration(duration('slow'))
+        x1, y1, x2, y2 = motion_easing('standard')
+        curve = QEasingCurve(QEasingCurve.Type.BezierSpline)
+        curve.addCubicBezierSegment(QPointF(x1, y1), QPointF(x2, y2), QPointF(1, 1))
+        self._sidebar_animation.setEasingCurve(curve)
+        self._sidebar_animation.setStartValue(start)
+        self._sidebar_animation.setEndValue(end)
+        self._sidebar_animation.finished.connect(lambda: self.sidebar.setFixedWidth(end))
+        self._sidebar_animation.finished.connect(lambda: self._move_nav_indicator(self.stack.currentIndex(), False))
+        self._sidebar_animation.start()
+
+    def _move_nav_indicator(self, index, animate=True):
+        if not hasattr(self, 'nav_indicator') or not self.nav_indicator:
+            return
+        name = PAGES[index] if 0 <= index < len(PAGES) else 'Dashboard'
+        target = self.nav.get(name)
+        if target is None or not target.isVisible():
+            self.nav_indicator.hide()
+            return
+        point = target.mapTo(self.sidebar, QPoint(0, 0))
+        rtl = self.layoutDirection() == Qt.LayoutDirection.RightToLeft
+        offset = target.width() - self.nav_indicator.width() - token('space_2') if rtl else token('space_2')
+        pos = QPoint(point.x() + int(offset), point.y() +
+                     (target.height() - self.nav_indicator.height()) // 2)
+        if not self.nav_indicator.isVisible() or reduce_motion() or not animate:
+            self.nav_indicator.move(pos)
+            self.nav_indicator.show()
+            self.nav_indicator.raise_()
+            return
+        if getattr(self, '_indicator_animation', None) is not None:
+            self._indicator_animation.stop()
+        self._indicator_animation = QPropertyAnimation(self.nav_indicator, b'pos', self)
+        self._indicator_animation.setDuration(duration('slow'))
+        self._indicator_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._indicator_animation.setStartValue(self.nav_indicator.pos())
+        self._indicator_animation.setEndValue(pos)
+        self._indicator_animation.start()
+
     def navigate(self, name):
-        self.stack.setCurrentIndex(PAGES.index(name))
-        for key, btn in self.nav.items():
-            btn.setChecked(key == name)
+        index = PAGES.index(name)
+        if self.stack.currentIndex() != index:
+            if self._page_animation is not None:
+                self._page_animation.stop()
+            self.stack.setCurrentIndex(index)
+            if not reduce_motion():
+                page = self.stack.currentWidget()
+                effect = QGraphicsOpacityEffect(page)
+                effect.setOpacity(0.0)
+                page.setGraphicsEffect(effect)
+                animation = QPropertyAnimation(effect, b'opacity', self)
+                animation.setDuration(duration('slow'))
+                animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+                animation.setStartValue(0.0)
+                animation.setEndValue(1.0)
+                animation.finished.connect(lambda w=page, e=effect:
+                                           w.setGraphicsEffect(None) if w.graphicsEffect() is e else None)
+                self._page_animation = animation
+                QTimer.singleShot(0, animation.start)
+        for key, nav_button in self.nav.items():
+            nav_button.setChecked(key == name)
+            nav_button.refresh_icon()
+        active_tab = ('Studio' if name == 'Dashboard' else
+                      'Convert' if name in ('MP4 Profile Fixer', 'HQX Converter') else
+                      'Tools' if name in ('System Tweaks', 'QSV Advanced', 'Logs', 'Settings', 'Support') else None)
+        if active_tab and hasattr(self, 'tabs'):
+            self.tabs.value = active_tab
+            for key, tab_button in self.tabs.buttons.items():
+                tab_button.setChecked(key == active_tab)
         if name == 'Logs':
             # The bounded model only renders while visible; show it without a delay.
             self.logs.refresh()
+        QTimer.singleShot(0, lambda: self._move_nav_indicator(index, True))
 
     def search_changed(self, query):
         if self.stack.currentIndex() == PAGES.index('Logs'):
@@ -248,27 +435,54 @@ class MainWindow(GlassWindow):
         self.logs.refresh()
         self.logs.append('INFO','Language changed. The encoding window uses the chosen language for live status labels.')
 
+    def change_theme(self, mode):
+        mode = mode if mode in ('system', 'dark', 'light') else 'system'
+        self.settings.set('theme', mode)
+        if self._theme_animation is not None:
+            self._theme_animation.stop()
+        if reduce_motion():
+            self.setGraphicsEffect(None)
+            apply_theme(QApplication.instance(), mode)
+            return
+        effect = QGraphicsOpacityEffect(self)
+        self._theme_effect = effect
+        self.setGraphicsEffect(effect)
+
+        def fade_in(start):
+            apply_theme(QApplication.instance(), mode)
+            effect.setOpacity(start)
+            animation = QPropertyAnimation(effect, b'opacity', self)
+            animation.setDuration(duration('slow') // 2)
+            animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+            animation.setStartValue(start)
+            animation.setEndValue(1.0)
+            animation.finished.connect(lambda: self.setGraphicsEffect(None)
+                                       if self.graphicsEffect() is effect else None)
+            self._theme_animation = animation
+            animation.start()
+
+        animation = QPropertyAnimation(effect, b'opacity', self)
+        animation.setDuration(duration('slow') // 2)
+        animation.setEasingCurve(QEasingCurve.Type.InCubic)
+        animation.setStartValue(1.0)
+        animation.setEndValue(.35)
+        animation.finished.connect(lambda: fade_in(.35))
+        self._theme_animation = animation
+        animation.start()
+
     def create_tray(self):
-        svg = asset('icons', 'booster.svg')
-        if svg.is_file():
-            icon = QIcon(str(svg))
-        else:
-            pixmap = QPixmap(32,32)
-            pixmap.fill(QColor('#71586e'))
-            painter = QPainter(pixmap)
-            painter.setPen(QColor('#ffd3f4'))
-            painter.drawText(pixmap.rect(), Qt.AlignCenter, 'H')
-            painter.end()
-            icon = QIcon(pixmap)
-        self.setWindowIcon(icon)
-        self.tray = QSystemTrayIcon(icon, self)
+        tray_icon = icon('brand', size=int(token('icon_l') + token('space_2')))
+        self.setWindowIcon(tray_icon)
+        self.tray = QSystemTrayIcon(tray_icon, self)
         menu = QMenu(self)
         menu.addAction('EDIUS Booster', self.showNormal)
         menu.addAction(tr('Encoding queue'), self.encoding.open)
         menu.addAction(tr('Show monitor'), self.monitor.show)
         menu.addAction('Exit', self.close)
+        menu.setLayoutDirection(self.layoutDirection())
         self.tray.setContextMenu(menu)
-        self.tray.activated.connect(lambda reason: self.encoding.open() if reason == QSystemTrayIcon.DoubleClick else None)
+        self.tray.activated.connect(lambda reason: self.encoding.open()
+                                    if reason == QSystemTrayIcon.ActivationReason.DoubleClick else None)
         if QSystemTrayIcon.isSystemTrayAvailable():
             self.tray.show()
 
@@ -290,6 +504,9 @@ class MainWindow(GlassWindow):
         self.manager.capabilities = caps
         ready = caps.get('codecs',{}).get('h264_qsv',{}).get('available',False)
         self.cap_badge.setText(tr('QSV ready ✓') if ready else tr('CPU fallback'))
+        self.cap_badge.setProperty('tone', 'success' if ready else 'info')
+        self.cap_badge.style().unpolish(self.cap_badge)
+        self.cap_badge.style().polish(self.cap_badge)
         text = caps.get('error') or caps.get('adapter','') + '\n' + '\n'.join(
             f'{codec}: {"ready" if values["available"] else "unavailable: " + values.get("reason", "self-test failed")}' for codec,values in caps.get('codecs',{}).items())
         text += '\nQSV device: ' + (caps.get('qsv_device') or 'unavailable')
@@ -473,6 +690,8 @@ class MainWindow(GlassWindow):
         self.manager.high_priority = high_priority
 
     def safety_toast(self, reason):
+        if self.toast is not None:
+            self.toast.show_message(reason, 'warning', timeout=int(token('toast_duration')) * 2)
         if self.tray.isVisible():
             self.tray.showMessage('EDIUS Booster — Safety pause', reason,
                                   QSystemTrayIcon.Warning, 10000)

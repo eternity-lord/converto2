@@ -32,8 +32,11 @@ def test_pages_and_language(tmp_path,monkeypatch):
         app.processEvents()
     window.change_language('fa')
     app.processEvents()
+    assert window.search.property('rtl') is True
+    assert window.encoding.table.property('rtl') is True
     window.change_language('en')
     app.processEvents()
+    assert window.search.property('rtl') is False
     window.encoding.open()
     app.processEvents()
     close_window(window)

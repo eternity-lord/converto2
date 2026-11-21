@@ -33,8 +33,15 @@ jobs:
         run: |
           python -m compileall -q app main.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python -m pytest -q
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m pytest -q --tb=short *> pytest-output.txt
+          $testStatus = $LASTEXITCODE
+          Get-Content pytest-output.txt
+          if ($testStatus -ne 0) {
+            $summary = (Get-Content pytest-output.txt -Tail 30) -join "`n"
+            $summary = $summary.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            Write-Output "::error title=Pytest failure::$summary"
+            exit $testStatus
+          }
 
       - name: Build the Windows application folder
         run: python -m PyInstaller --clean --noconfirm EdiusBooster.spec

@@ -6,7 +6,7 @@ from dataclasses import replace
 from pathlib import Path
 from datetime import date
 from PySide6.QtCore import Qt, Signal, QTimer, QByteArray, QPropertyAnimation, QEasingCurve, QPoint, QPointF, QSize
-from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget, QLineEdit,
+from PySide6.QtWidgets import (QWidget, QLabel, QVBoxLayout, QHBoxLayout, QStackedWidget, QLineEdit,
                               QSystemTrayIcon, QMenu, QApplication, QGraphicsOpacityEffect, QSizePolicy)
 from app.ui.theme import apply_theme
 from app.ui.design_tokens import token, duration, motion_easing, reduce_motion

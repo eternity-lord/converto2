@@ -2,8 +2,10 @@ import json
 from collections import deque
 from datetime import datetime
 from PySide6.QtCore import QTimer
+from PySide6.QtGui import QFont, QColor
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLineEdit, QScrollArea, QPlainTextEdit,
                                QApplication, QComboBox)
+from app.ui.design_tokens import token
 from app.ui.widgets.common import Card, Pills, Toggle, label, button, row
 from app.ui import dialogs
 from app.i18n import tr
@@ -15,6 +17,9 @@ class LogView(QWidget):
         self.records = deque(maxlen=400)
         self.level = 'All'
         self.box = QVBoxLayout(self)
+        self.box.setContentsMargins(token('space_0'), token('space_0'), token('space_0'), token('space_0'))
+        self.box.setSpacing(token('space_3'))
+        self.filters = Card('Logs')
         self.pills = Pills(['All', 'Info', 'Warn', 'Error'])
         self.pills.selected.connect(self.set_level)
         self.search = QLineEdit()
@@ -23,23 +28,26 @@ class LogView(QWidget):
         self.job_filter = QComboBox()
         self.job_filter.addItem(tr('All files'), '')
         self.job_filter.currentIndexChanged.connect(lambda _: self.refresh())
-        self.job_filter.setMinimumWidth(190)
+        self.job_filter.setMinimumWidth(int(token('job_filter_min_width')))
         self.auto = Toggle('Auto-scroll', True)
-        self.export_button = button('Export', self.export)
-        self.clear_button = button('Clear', self.clear)
-        self.box.addLayout(row(self.pills, self.search, self.job_filter,
-                               self.export_button, self.clear_button))
-        self.box.addWidget(self.auto)
+        self.export_button = button('Export', self.export, variant='secondary')
+        self.clear_button = button('Clear', self.clear, variant='ghost')
+        self.filters.box.addLayout(row(self.pills, self.search, self.job_filter,
+                                       self.export_button, self.clear_button))
+        self.filters.box.addWidget(self.auto)
+        self.box.addWidget(self.filters)
         self.area = QScrollArea()
         self.area.setWidgetResizable(True)
         self.content = QWidget()
         self.cards = QVBoxLayout(self.content)
+        self.cards.setContentsMargins(token('space_0'), token('space_0'), token('space_0'), token('space_0'))
+        self.cards.setSpacing(token('space_3'))
         self.cards.addStretch()
         self.area.setWidget(self.content)
         self.box.addWidget(self.area)
         self.dirty = False
         self.timer = QTimer(self)
-        self.timer.setInterval(350)
+        self.timer.setInterval(int(token('log_refresh_interval')))
         self.timer.timeout.connect(self.refresh_if_dirty)
         self.timer.start()
 
@@ -91,12 +99,12 @@ class LogView(QWidget):
                    and query in (r['message'] + ' ' + r['file']).casefold()][-100:]
         for record in matches:
             card = Card()
-            card.box.setContentsMargins(16, 12, 16, 12)
+            card.box.setContentsMargins(token('space_4'), token('space_3'), token('space_4'), token('space_3'))
             chip = label(record['level'], 'badge')
-            chip.setStyleSheet(f'color: {"#f87171" if record["level"] == "ERROR" else "#d0aec7"};')
+            chip.setProperty('tone', {'ERROR': 'danger', 'WARN': 'warning', 'INFO': 'info'}.get(record['level'], 'info'))
             file = label(record['file'], 'muted')
             file.setWordWrap(False)
-            file.setMaximumWidth(330)
+            file.setMaximumWidth(int(token('log_file_max_width')))
             file.setToolTip(record['file'])
             if len(record['file']) > 42:
                 file.setText(record['file'][:41] + '…')
@@ -107,8 +115,11 @@ class LogView(QWidget):
             if record['details']:
                 detail = QPlainTextEdit(record['details'])
                 detail.setReadOnly(True)
-                detail.setMaximumHeight(170)
-                detail.setStyleSheet('font-family: monospace; font-size: 11px;')
+                detail.setMaximumHeight(int(token('log_detail_max_height')))
+                detail_font = detail.font()
+                detail_font.setFamilies(['JetBrains Mono', 'Cascadia Code', 'Cascadia Mono', 'Consolas', 'DejaVu Sans Mono'])
+                detail_font.setPointSize(int(token('font_caption')))
+                detail.setFont(detail_font)
                 detail.hide()
                 toggle = button('Details', lambda checked=False, w=detail: w.setVisible(not w.isVisible()))
                 copy = button('Copy', lambda checked=False, r=record: QApplication.clipboard().setText(r['details']))

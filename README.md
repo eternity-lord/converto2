@@ -28,6 +28,14 @@ missing executable produces a clear message. Use **Settings → Restart as
 administrator** only for opt-in Windows system tweaks. No system tuning is applied
 automatically, except restoration of a previous crash-recovery marker.
 
+## Windows installer
+
+The x64 installer is built on Windows by GitHub Actions and attached to tagged
+`obsidian-glass-v*` releases. **[Download from GitHub Releases](https://github.com/eternity-lord/converto2/releases)**.
+The installer includes the PySide6 application, fonts, and UI assets. FFmpeg remains
+an explicit prerequisite: place `ffmpeg.exe` and `ffprobe.exe` next to the installed
+`EdiusBooster.exe`, or make them available on `PATH`.
+
 ## What Round 2 changed
 
 These are the defects that still made a working build look broken after Round 1:

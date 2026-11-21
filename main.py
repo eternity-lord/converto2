@@ -19,7 +19,7 @@ def main():
     app.setOrganizationName('Mohammad Irani')
     settings = Settings()
     set_language(settings.get('language','en'))
-    apply_theme(app)
+    apply_theme(app, settings.get('theme', 'system'))
     window = MainWindow(settings)
     window.show()
     return app.exec()

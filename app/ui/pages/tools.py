@@ -5,6 +5,7 @@ from app.ui.widgets.common import Card, Toggle, label, button, row
 from app.ui.pages.fixer import combo, selected
 from app.ui import dialogs
 from app.core.system_tweaks import elevate
+from app.ui.design_tokens import token
 from app.i18n import tr
 
 ADVANCED = {
@@ -22,14 +23,16 @@ class AdvancedPage(QWidget):
         super().__init__()
         self.settings = settings
         self.box = QVBoxLayout(self)
+        self.box.setContentsMargins(token('space_0'), token('space_0'), token('space_0'), token('space_0'))
+        self.box.setSpacing(token('space_4'))
         self.box.addWidget(label('QSV Advanced', 'title'))
         self.box.addWidget(label('Only options proven by the capability probe can be enabled. TV profile, GOP, B-frames and references stay safety-locked.', 'muted'))
         self.search = QLineEdit()
-        self.search.setPlaceholderText('Search parameter…')
+        self.search.setPlaceholderText(tr('Search parameter…'))
         self.search.textChanged.connect(self.filter)
         self.box.addWidget(self.search)
         self.encoder = combo(['h264_qsv', 'hevc_qsv', 'av1_qsv'])
-        self.encoder.setToolTip('TV mode uses AVC only. HEVC / AV1 availability is informational.')
+        self.encoder.setToolTip(tr('TV mode uses AVC only. HEVC / AV1 availability is informational.'))
         self.encoder.currentIndexChanged.connect(lambda _: self.apply_caps(self.caps))
         self.box.addWidget(self.encoder)
         card = Card('Encoder preset')
@@ -39,6 +42,7 @@ class AdvancedPage(QWidget):
         card.box.addWidget(label('Medium / slow is recommended. Veryslow may add latency with little TV-visible improvement.', 'muted'))
         self.box.addWidget(card)
         grid = QGridLayout()
+        grid.setSpacing(token('space_4'))
         self.entries = {}
         self.cards = {}
         self.caps = {}
@@ -46,15 +50,15 @@ class AdvancedPage(QWidget):
         for i, (key, title) in enumerate(ADVANCED.items()):
             card = Card(title)
             edit = QLineEdit(str(stored.get(key, '')))
-            edit.setPlaceholderText('Auto / unsupported')
+            edit.setPlaceholderText(tr('Auto / unsupported'))
             edit.setEnabled(False)
-            edit.setToolTip('Disabled until this exact parameter passes a hardware encode test.')
+            edit.setToolTip(tr('Disabled until this exact parameter passes a hardware encode test.'))
             card.box.addWidget(label(key, 'muted'))
             card.box.addWidget(edit)
             grid.addWidget(card, i//2, i%2)
             self.entries[key], self.cards[key] = edit, card
         self.box.addLayout(grid)
-        self.box.addWidget(button('Save settings', self.save))
+        self.box.addWidget(button('Save settings', self.save, primary=True))
         self.box.addStretch()
 
     def filter(self, query):
@@ -83,9 +87,12 @@ class TweaksPage(QWidget):
     def __init__(self):
         super().__init__()
         box = QVBoxLayout(self)
+        box.setContentsMargins(token('space_0'), token('space_0'), token('space_0'), token('space_0'))
+        box.setSpacing(token('space_4'))
         box.addWidget(label('System Tweaks', 'title'))
         box.addWidget(label('Nothing is applied automatically. Changes are journaled before modification and restored on exit / next start.', 'muted'))
         grid = QGridLayout()
+        grid.setSpacing(token('space_4'))
         self.toggles = {}
         values = [
             ('power', 'Performance power plan', 'Clone the current plan; AC CPU min/max 100%. Original plan stays untouched.'),
@@ -109,10 +116,10 @@ class TweaksPage(QWidget):
             grid.addWidget(card, i//2, i%2)
         box.addLayout(grid)
         self.folder = QLineEdit()
-        self.folder.setPlaceholderText('Defender exclusion folder (optional)')
+        self.folder.setPlaceholderText(tr('Defender exclusion folder (optional)'))
         box.addLayout(row(self.folder, button('Browse', self.browse)))
         box.addLayout(row(button('Apply selected tweaks', self.apply, True),
-                          button('Restore originals', self.restore_requested.emit),
+                          button('Restore originals', self.restore_requested.emit, variant='danger'),
                           button('Show monitor', self.monitor_requested.emit)))
         box.addStretch()
 
@@ -129,6 +136,7 @@ class TweaksPage(QWidget):
 
 class SettingsPage(QWidget):
     language_changed = Signal(str)
+    theme_changed = Signal(str)
     reprobe = Signal()
     concurrency_changed = Signal(int)
     monitor_requested = Signal()
@@ -138,18 +146,29 @@ class SettingsPage(QWidget):
         super().__init__()
         self.settings = settings
         box = QVBoxLayout(self)
+        box.setContentsMargins(token('space_0'), token('space_0'), token('space_0'), token('space_0'))
+        box.setSpacing(token('space_4'))
         card = Card('Settings', True)
         self.lang = combo(['EN', 'فارسی'], 'فارسی' if settings.get('language') == 'fa' else 'EN')
         self.lang.currentIndexChanged.connect(lambda _: self.language_changed.emit('fa' if selected(self.lang) == 'فارسی' else 'en'))
         form = QFormLayout()
+        form.setHorizontalSpacing(token('space_3'))
+        form.setVerticalSpacing(token('space_2'))
         form.addRow(tr('Language / زبان'), self.lang)
+        self.theme = QComboBox()
+        for title, value in [('System', 'system'), ('Dark', 'dark'), ('Light', 'light')]:
+            self.theme.addItem(tr(title), value)
+        theme_index = self.theme.findData(settings.get('theme', 'system'))
+        self.theme.setCurrentIndex(max(0, theme_index))
+        self.theme.currentIndexChanged.connect(lambda _: self.theme_changed.emit(selected(self.theme)))
+        form.addRow(tr('Appearance'), self.theme)
         self.parallel = combo(['1', '2', '3'], str(settings.get('parallel','1')))
         self.parallel.currentIndexChanged.connect(self.change_parallel)
         form.addRow(tr('Parallel jobs'), self.parallel)
         self.scratch = QLineEdit(settings.get('scratch',''))
         scratch_row = QWidget()
         layout = row(self.scratch, button('Browse', self.browse))
-        layout.setContentsMargins(0,0,0,0)
+        layout.setContentsMargins(token('space_0'), token('space_0'), token('space_0'), token('space_0'))
         scratch_row.setLayout(layout)
         form.addRow(tr('NVMe / RAM disk scratch'), scratch_row)
         card.box.addLayout(form)
@@ -162,12 +181,11 @@ class SettingsPage(QWidget):
         card.box.addLayout(row(self.safe,self.performance))
         card.box.addWidget(self.high_priority)
         card.box.addWidget(label('Default: one job, NORMAL priority, leave two logical cores free, 16 GPU upload frames. Free RAM <3 GB forces one job. Sustained RAM >90% / CPU >95% pauses the queue after 10 seconds in either mode.', 'muted'))
-        self.warning = label('Warning: 2–3 jobs, High priority or Performance mode can make the PC unresponsive. Changes apply to newly started jobs. Performance mode uses all encoder threads; resource guards remain enabled.', 'muted')
-        self.warning.setStyleSheet('color:#e8c278;')
+        self.warning = label('Warning: 2–3 jobs, High priority or Performance mode can make the PC unresponsive. Changes apply to newly started jobs. Performance mode uses all encoder threads; resource guards remain enabled.', 'warning')
         card.box.addWidget(self.warning)
         self.update_warning()
 
-        card.box.addLayout(row(button('Save settings', lambda: settings.set('scratch',self.scratch.text())),
+        card.box.addLayout(row(button('Save settings', lambda: settings.set('scratch',self.scratch.text()), primary=True),
                                 button('Re-probe hardware', self.reprobe.emit)))
         card.box.addLayout(row(button('Restart as administrator', self.admin), button('Show monitor', self.monitor_requested.emit)))
         self.capabilities = label('Checking FFmpeg / QSV…', 'muted')
@@ -211,6 +229,8 @@ class SupportPage(QWidget):
     def __init__(self):
         super().__init__()
         box = QVBoxLayout(self)
+        box.setContentsMargins(token('space_0'), token('space_0'), token('space_0'), token('space_0'))
+        box.setSpacing(token('space_4'))
         card = Card('EDIUS Ultimate Render Booster', True)
         card.box.addWidget(label('7.0 · Intel QSV / verified TV compatibility', 'number'))
         card.box.addWidget(label('Designed for Mohammad Irani\nOriginal application and credit: Mohammad Irani', 'title'))

@@ -4,6 +4,7 @@ from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLineEdit, QComboBox,
                               QDoubleSpinBox, QSpinBox, QFormLayout)
 from app.core.tv_rules import Options, PRESETS, DESCRIPTIONS
+from app.ui.design_tokens import token
 from app.ui.widgets.common import Card, Pills, Toggle, label, button, row
 from app.ui import dialogs
 from app.i18n import tr
@@ -37,10 +38,11 @@ class FixerPage(QWidget):
         opts = Options(**{k: v for k, v in stored.items() if k in allowed})
         self.controls = {}
         self.encoder_choice = combo(['h264_qsv', 'hevc_qsv', 'av1_qsv'], opts.codec)
-        self.encoder_choice.setToolTip('HEVC / AV1 require modern playback devices. CPU fallback always uses AVC for compatibility.')
+        self.encoder_choice.setToolTip(tr('HEVC / AV1 require modern playback devices. CPU fallback always uses AVC for compatibility.'))
         self.encoder_choice.setVisible(hqx)
         self.box = QVBoxLayout(self)
-        self.box.setSpacing(15)
+        self.box.setContentsMargins(token('space_0'), token('space_0'), token('space_0'), token('space_0'))
+        self.box.setSpacing(int(token('space_4')))
         folder_card = Card('HQX Converter' if hqx else 'MP4 Profile Fixer', True)
         folder_card.box.addWidget(label('Recursive watch folder · stable size + modification time · source files preserved by default'
                                          if hqx else 'Rebuild timing. Remove unsafe streams. Deliver one verified TV-ready MP4.', 'muted'))
@@ -49,7 +51,7 @@ class FixerPage(QWidget):
         folder_card.box.addLayout(row(self.folder, button('Browse', self.browse)))
         self.box.addWidget(folder_card)
         grid = QGridLayout()
-        grid.setSpacing(15)
+        grid.setSpacing(int(token('space_4')))
         preset_card = Card('TV preset')
         self.preset = combo(list(PRESETS), opts.preset)
         preset_card.box.addWidget(self.preset)
@@ -69,11 +71,13 @@ class FixerPage(QWidget):
         grid.addWidget(preset_card, 0, 0)
         video = Card('Video')
         form = QFormLayout()
+        form.setHorizontalSpacing(token('space_3'))
+        form.setVerticalSpacing(token('space_2'))
         self.field(form, 'Profile', 'profile', combo(['baseline', 'main', 'high'], opts.profile))
-        self.controls['profile'].setToolTip('TV mode disables High10 / High422 / High444: only 8-bit 4:2:0 is safe.')
+        self.controls['profile'].setToolTip(tr('TV mode disables High10 / High422 / High444: only 8-bit 4:2:0 is safe.'))
         self.field(form, 'Level', 'level', combo(['Auto', '3.0', '3.1', '3.2', '4.0', '4.1', '4.2', '5.0', '5.1', '5.2'], opts.level))
         self.field(form, 'Rate control', 'rc', combo(['VBR', 'CBR', 'Quality'], 'Quality' if opts.rc in ('CQP', 'ICQ') else opts.rc))
-        self.controls['rc'].setToolTip('Quality uses tested ICQ; if unsupported, uses explicit VBR with the selected bitrate/maxrate/buffer. Software uses CRF.')
+        self.controls['rc'].setToolTip(tr('Quality uses tested ICQ; if unsupported, uses explicit VBR with the selected bitrate/maxrate/buffer. Software uses CRF.'))
         for title, key in [('Bitrate (Mbps)', 'bitrate'), ('Maxrate (Mbps)', 'maxrate'), ('Buffer (Mbps)', 'bufsize')]:
             spin = QDoubleSpinBox()
             spin.setRange(.1, 100)
@@ -91,13 +95,15 @@ class FixerPage(QWidget):
         self.fps = Pills(choices, chosen)
         timing.box.addWidget(self.fps)
         self.custom_fps = QLineEdit(opts.fps if chosen == 'Custom' else '30000/1001')
-        self.custom_fps.setPlaceholderText('e.g. 30000/1001 or 27.5')
+        self.custom_fps.setPlaceholderText(tr('e.g. 30000/1001 or 27.5'))
         self.custom_fps.setVisible(chosen == 'Custom')
         self.fps.selected.connect(lambda value: self.custom_fps.setVisible(value == 'Custom'))
         timing.box.addWidget(self.custom_fps)
         form = QFormLayout()
+        form.setHorizontalSpacing(token('space_3'))
+        form.setVerticalSpacing(token('space_2'))
         self.field(form, 'Conversion method', 'method', combo(['Drop / Duplicate', 'Frame blend', 'Motion interpolation'], opts.method))
-        self.controls['method'].setToolTip('Motion interpolation is CPU-intensive and may create artifacts. Integer multiples use clean duplication.')
+        self.controls['method'].setToolTip(tr('Motion interpolation is CPU-intensive and may create artifacts. Integer multiples use clean duplication.'))
         self.field(form, 'Resolution cap', 'resolution', combo(['keep', '1080p', '720p'], opts.resolution))
         self.field(form, 'FPS cap', 'fps_cap', combo(['keep', '30', '25'], opts.fps_cap))
         timing.box.addLayout(form)
@@ -109,11 +115,13 @@ class FixerPage(QWidget):
         grid.addWidget(timing, 1, 0, 1, 2)
         output = Card('Output')
         form = QFormLayout()
+        form.setHorizontalSpacing(token('space_3'))
+        form.setVerticalSpacing(token('space_2'))
         self.field(form, 'Output', 'output_mode', combo(['Same folder', '_TV subfolder', 'Custom'], opts.output_mode))
         custom_row = QWidget()
         self.custom_output = QLineEdit(opts.output_folder)
         layout = row(self.custom_output, button('Browse', lambda: self.choose_path(self.custom_output)))
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(token('space_0'), token('space_0'), token('space_0'), token('space_0'))
         custom_row.setLayout(layout)
         form.addRow(tr('Custom'), custom_row)
         self.field(form, 'Suffix', 'suffix', QLineEdit(opts.suffix))
@@ -125,6 +133,8 @@ class FixerPage(QWidget):
         grid.addWidget(output, 2, 0)
         audio = Card('Audio')
         form = QFormLayout()
+        form.setHorizontalSpacing(token('space_3'))
+        form.setVerticalSpacing(token('space_2'))
         self.field(form, 'Audio', 'audio', combo(['TV-safe', 'Keep all'], 'TV-safe' if opts.audio == 'Copy' else opts.audio))
         audio.box.addLayout(form)
         audio.box.addWidget(label('AAC-LC · 48 kHz · stereo · 192 kbps\nAsync resampling, start-offset repair, duration verification <40 ms.\nMissing audio → silent stereo track.', 'muted'))
@@ -134,13 +144,13 @@ class FixerPage(QWidget):
         self.box.addLayout(grid)
         controls = [button('Add folder', self.add_only), button('Analyze files', self.analyze),
                     button('Start Watching' if hqx else 'Start Fix', self.start, True),
-                    button('Stop Watching' if hqx else 'Stop all', self.stop)]
+                    button('Stop Watching' if hqx else 'Stop all', self.stop, variant='danger')]
         # Kept outside the scroll area by MainWindow so the primary action is always
         # reachable, no matter how far the options are scrolled.
         self.action_bar = QWidget()
         action_layout = QHBoxLayout()
-        action_layout.setContentsMargins(0, 2, 0, 0)
-        action_layout.setSpacing(10)
+        action_layout.setContentsMargins(token('space_0'), token('space_half'), token('space_0'), token('space_0'))
+        action_layout.setSpacing(token('space_2'))
         action_layout.addWidget(controls[0])
         action_layout.addWidget(controls[1])
         action_layout.addWidget(controls[2], 2)  # wider glowing primary action

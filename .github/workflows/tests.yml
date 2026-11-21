@@ -13,4 +13,18 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y ffmpeg libegl1 libgl1 libxkbcommon0 libdbus-1-3
       - run: pip install -r requirements-dev.txt
       - run: python -m compileall -q app main.py
-      - run: python -m pytest -q
+      - name: Run tests
+        run: |
+          set +e
+          python -m pytest -q --tb=short > pytest-output.txt 2>&1
+          status=$?
+          cat pytest-output.txt
+          if [ "$status" -ne 0 ]; then
+            python - <<'PY'
+          from pathlib import Path
+          output = chr(10).join(Path('pytest-output.txt').read_text(errors='replace').splitlines()[-30:])
+          escaped = output.replace('%', '%25').replace(chr(13), '%0D').replace(chr(10), '%0A')
+          print(f'::error title=Pytest failure::{escaped}')
+          PY
+          fi
+          exit "$status"

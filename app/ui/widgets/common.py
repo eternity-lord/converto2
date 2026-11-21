@@ -11,13 +11,13 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import (
     QColor, QPainter, QPainterPath, QLinearGradient, QRadialGradient, QPen,
-    QPixmap, QIcon, QStyleOptionButton, QPalette, QTransform,
+    QPixmap, QIcon, QPalette, QTransform,
 )
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QGraphicsDropShadowEffect, QScrollArea, QSizeGrip, QSizePolicy,
     QProgressBar, QTableWidget, QDialog, QGraphicsOpacityEffect, QStyle,
-    QFrame, QCheckBox,
+    QStyleOptionButton, QFrame, QCheckBox,
 )
 from app.i18n import tr
 from app.ui.design_tokens import duration, elevation, motion_easing, reduce_motion, token

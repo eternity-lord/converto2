@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+build/
+dist/
+*.part.mp4
+*.log
+.cache/
+ffmpeg.exe
+ffprobe.exe
+*.zip
+
+# local verification artifacts
+shots/
+e2e_report.json
+*.part.mp4
